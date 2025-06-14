@@ -1,0 +1,204 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const adminContent = document.getElementById('admin-content');
+    let authToken = localStorage.getItem('authToken');
+
+    function showAdminMessage(container, message, type = 'success') {
+        const messageDivId = 'admin-message-area-dynamic';
+        let messageArea = document.getElementById(messageDivId);
+        if (!messageArea) {
+            messageArea = document.createElement('div');
+            messageArea.id = messageDivId;
+            const firstChildOfContainer = container.querySelector('.form-section, .project-list-section, h2, h3');
+            if (firstChildOfContainer) container.insertBefore(messageArea, firstChildOfContainer);
+            else container.prepend(messageArea);
+        }
+        messageArea.textContent = message;
+        messageArea.className = `message-area message-${type}`;
+        messageArea.style.display = 'block';
+        messageArea.style.marginBottom = '20px';
+        setTimeout(() => { if(messageArea) messageArea.style.display = 'none'; }, 7000);
+    }
+
+    function renderLoginForm() {
+        adminContent.innerHTML = `
+            <div class="form-section admin-login-prompt" style="max-width: 500px; margin: 50px auto;">
+                <h2><i class="fas fa-sign-in-alt"></i> Admin Login</h2>
+                <form id="login-form">
+                    <div><label for="username">Username:</label><input type="text" id="username" name="username" required autocomplete="username"></div>
+                    <div><label for="password">Password:</label><input type="password" id="password" name="password" required autocomplete="current-password"></div>
+                    <button type="submit" class="btn btn-primary btn-block"><i class="fas fa-sign-in-alt"></i> Login</button>
+                </form>
+            </div>`;
+        const loginForm = document.getElementById('login-form');
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = loginForm.username.value, password = loginForm.password.value;
+            const btn = loginForm.querySelector('button[type="submit"]');
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logging in...';
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || 'Login gagal');
+                authToken = data.token; localStorage.setItem('authToken', authToken);
+                showAdminMessage(adminContent, 'Login berhasil! Memuat dashboard...', 'success');
+                setTimeout(renderAdminDashboard, 1000);
+            } catch (error) {
+                showAdminMessage(loginForm.parentElement, error.message, 'error');
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Login';
+            }
+        });
+    }
+
+    async function renderAdminDashboard() {
+        if (!authToken) { renderLoginForm(); return; }
+        adminContent.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2><i class="fas fa-cogs"></i> Kelola Proyek</h2>
+                <button id="logout-btn" class="btn btn-danger"><i class="fas fa-sign-out-alt"></i> Logout</button>
+            </div>
+            <div class="form-section">
+                <h3><i class="fas fa-plus-circle"></i> Tambah Proyek Baru</h3>
+                <form id="add-project-form" enctype="multipart/form-data">
+                    <div><label for="projectName">Nama Proyek:</label><input type="text" id="projectName" name="projectName" required></div>
+                    <div><label for="description">Deskripsi:</label><textarea id="description" name="description" rows="3"></textarea></div>
+                    <div><label for="subdomain">Subdomain:</label><input type="text" id="subdomain" name="subdomain" pattern="[a-z0-9\\-]+"><small>Huruf kecil, angka, tanda hubung. Contoh: my-project</small></div>
+                    <div><label for="repoUrl">URL Git Repository (Opsional):</label><input type="text" id="repoUrl" name="repoUrl" placeholder="https://github.com/user/repo.git"></div>
+                    <div><label for="projectFiles">Upload File Proyek (Bisa multiple/ZIP):</label><input type="file" id="projectFiles" name="projectFiles" multiple><small>Jika ZIP & file lain, ZIP diprioritaskan. Utk file individual, jangan sertakan ZIP.</small></div>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-plus"></i> Tambah Proyek</button>
+                </form>
+            </div>
+            <div class="project-list-section">
+                <h3><i class="fas fa-tasks"></i> Daftar Proyek (<span id="project-count">0</span>)</h3>
+                <div id="admin-project-list"><p class="loading-text">Memuat proyek admin...</p></div>
+            </div>`;
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            localStorage.removeItem('authToken'); authToken = null;
+            showAdminMessage(adminContent, 'Logout berhasil.', 'success');
+            renderLoginForm();
+        });
+        document.getElementById('add-project-form').addEventListener('submit', handleAddProject);
+        fetchAdminProjects();
+    }
+
+    async function handleAddProject(e) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menambahkan...';
+        if (!formData.get('projectName')) {
+            showAdminMessage(e.target.parentElement, 'Nama Proyek wajib.', 'error');
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Tambah Proyek'; return;
+        }
+        const files = formData.getAll('projectFiles'), repoUrl = formData.get('repoUrl');
+        if (files.length === 0 && !repoUrl) {
+            showAdminMessage(e.target.parentElement, 'Upload file atau masukkan URL Repo.', 'error');
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Tambah Proyek'; return;
+        }
+        if (files.find(f => f.name.endsWith('.zip')) && files.length > 1) {
+            showAdminMessage(e.target.parentElement, 'Warning: ZIP & file lain diupload, ZIP akan diproses.', 'warn');
+        }
+        try {
+            const response = await fetch('/api/admin/projects', { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}` }, body: formData });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal tambah proyek');
+            showAdminMessage(e.target.parentElement, `Proyek "${data.project?.projectName || 'baru'}" ditambah! Deploy dimulai.`, 'success');
+            e.target.reset(); fetchAdminProjects(); 
+        } catch (error) {
+            showAdminMessage(e.target.parentElement, `Error: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Tambah Proyek';
+        }
+    }
+
+    async function fetchAdminProjects() {
+        const listDiv = document.getElementById('admin-project-list'), countSpan = document.getElementById('project-count');
+        if (!listDiv || !countSpan) return;
+        try {
+            const response = await fetch('/api/admin/projects', { headers: { 'Authorization': `Bearer ${authToken}` }});
+            if (response.status === 401 || response.status === 403) {
+                localStorage.removeItem('authToken'); authToken = null; renderLoginForm();
+                showAdminMessage(document.getElementById('admin-content'), 'Sesi tidak valid. Login lagi.', 'error'); return;
+            }
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({ message: `HTTP error! ${response.status}` }));
+                throw new Error(errData.message || `HTTP error! ${response.status}`);
+            }
+            const projects = await response.json();
+            countSpan.textContent = projects.length; renderAdminProjectTable(projects);
+        } catch (error) {
+            listDiv.innerHTML = `<p class="loading-text message-error">Gagal muat proyek admin: ${error.message}</p>`;
+        }
+    }
+
+    function renderAdminProjectTable(projects) {
+        const listDiv = document.getElementById('admin-project-list');
+        if (projects.length === 0) { listDiv.innerHTML = '<p>Belum ada proyek.</p>'; return; }
+        const table = document.createElement('table'); table.className = 'admin-project-table';
+        table.innerHTML = `<thead><tr><th>Nama</th><th>Subdomain</th><th>Status</th><th>URL Deploy</th><th>Update</th><th>Aksi</th></tr></thead><tbody></tbody>`;
+        const tbody = table.querySelector('tbody');
+        projects.forEach(p => {
+            const row = tbody.insertRow(), statusClass = (p.status || 'unknown').toLowerCase().replace(/_/g, '-');
+            row.innerHTML = `
+                <td>${p.projectName}</td><td>${p.subdomain||'-'}</td><td class="status status-${statusClass}">${p.status}</td>
+                <td>${p.deploymentUrl ? `<a href="${p.deploymentUrl}" target="_blank">${p.deploymentUrl}</a>` : 'N/A'}</td>
+                <td>${new Date(p.updatedAt).toLocaleString('id-ID')}</td>
+                <td><button class="btn btn-sm btn-secondary vd-btn" data-id="${p._id}"><i class="fas fa-eye"></i></button>
+                    <button class="btn btn-sm btn-danger del-btn" data-id="${p._id}"><i class="fas fa-trash"></i></button></td>`;
+            row.querySelector('.del-btn').addEventListener('click', (e) => handleDeleteProject(e.currentTarget.dataset.id, p.projectName));
+            row.querySelector('.vd-btn').addEventListener('click', (e) => showProjectDetailsModal(e.currentTarget.dataset.id));
+        });
+        listDiv.innerHTML = ''; listDiv.appendChild(table);
+    }
+    
+    async function showProjectDetailsModal(id) {
+        try {
+            const response = await fetch(`/api/admin/projects/${id}`, { headers: { 'Authorization': `Bearer ${authToken}` }});
+            if (!response.ok) { const d = await response.json().catch(()=>({})); throw new Error(d.message || 'Gagal ambil detail.');}
+            const p = await response.json();
+            let modal = document.getElementById('project-details-modal'); if (modal) modal.remove();
+            modal = document.createElement('div'); modal.id = 'project-details-modal';
+            const logs = p.logs?.map(l => `<li><small>${new Date(l.timestamp).toLocaleString('id-ID')}</small> <span class="lt-${l.type||'info'}">[${l.type||'info'}]</span> ${l.message}</li>`).reverse().join('') || '<li>Tidak ada log.</li>';
+            const statusCls = (p.status||'unknown').toLowerCase().replace(/_/g,'-');
+            modal.innerHTML = `
+                <div class="modal-content-wrapper">
+                    <button id="close-modal-btn" title="Tutup">×</button><h3>Detail: ${p.projectName}</h3>
+                    <p><strong>ID:</strong> ${p._id}</p><p><strong>Deskripsi:</strong> ${p.description||'-'}</p>
+                    <p><strong>Subdomain:</strong> ${p.subdomain||'-'}</p>
+                    <p><strong>Repo URL:</strong> ${p.repoUrl ? `<a href="${p.repoUrl}" target="_blank">${p.repoUrl}</a>` : '-'}</p>
+                    <p><strong>File Path (internal):</strong> ${p.filePath||(p.uploadedFilePaths?.length > 0 ? `${p.uploadedFilePaths.length} file individual` : '-')}</p>
+                    <p><strong>Status:</strong> <span class="status status-${statusCls}">${p.status}</span></p>
+                    <p><strong>URL Deploy:</strong> ${p.deploymentUrl ? `<a href="${p.deploymentUrl}" target="_blank">${p.deploymentUrl}</a>` : 'N/A'}</p>
+                    <p><strong>Vercel ID:</strong> ${p.vercelProjectId||'-'}</p><p><strong>GitHub Repo:</strong> ${p.githubRepoName||'-'}</p>
+                    <p><strong>Dibuat:</strong> ${new Date(p.createdAt).toLocaleString('id-ID')}</p><p><strong>Update:</strong> ${new Date(p.updatedAt).toLocaleString('id-ID')}</p>
+                    <h4><i class="fas fa-history"></i> Log:</h4><ul class="project-logs-list">${logs}</ul>
+                    <h4><i class="fas fa-star"></i> Reviews (${p.reviews?.length||0}):</h4>
+                    ${p.reviews?.length>0 ? `<div class="reviews-list modal-reviews-list">${p.reviews.map(r => `<div class="review-item"><p class="reviewer">${r.reviewerName||'Anonim'} (${renderStars(r.rating,true)})</p><p>${r.comment}</p></div>`).join('')}</div>` : '<p>Belum ada review.</p>'}
+                </div>`;
+            document.body.appendChild(modal);
+            document.getElementById('close-modal-btn').addEventListener('click',()=>modal.remove());
+            modal.addEventListener('click',(e)=>{if(e.target.id===modal.id)modal.remove();});
+        } catch (error) {
+            showAdminMessage(document.getElementById('admin-project-list').parentElement, `Error: ${error.message}`, 'error');
+        }
+    }
+    function renderStars(rating, small=false){let h='';const m=5,n=Number(rating);for(let i=1;i<=m;i++)h+=`<i class="fas fa-star ${i<=n?'':'empty'}" ${small?'style="font-size:0.8em;"':''}></i>`;return h;}
+
+    async function handleDeleteProject(id, name) {
+        if (!confirm(`Yakin hapus proyek "${name}"? Ini juga akan coba hapus resource di GitHub & Vercel.`)) return;
+        const area = document.getElementById('admin-project-list').parentElement;
+        showAdminMessage(area, `Menghapus "${name}"...`, 'info');
+        try {
+            const response = await fetch(`/api/admin/projects/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${authToken}` }});
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal hapus proyek');
+            showAdminMessage(area, data.message, 'success'); fetchAdminProjects(); 
+        } catch (error) {
+            showAdminMessage(area, `Error: ${error.message}`, 'error');
+        }
+    }
+
+    if (adminContent) { if (authToken) renderAdminDashboard(); else renderLoginForm(); }
+});
