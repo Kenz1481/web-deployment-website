@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WanzOFC Deploy - Proyek Terdeploy</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <div class="stars-bg"></div>
+    <div class="twinkling-bg"></div>
+
+    <header>
+        <div class="header-content">
+            <i class="fas fa-meteor fa-3x header-icon"></i>
+            <h1>WanzOFC Deploy</h1>
+            <p>Platform Deployment Cepat & Andal</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="projects-title-section">
+            <h2><i class="fas fa-tasks"></i> Proyek Terdeploy</h2>
+            <div id="message-area-public" class="message-area" style="display:none;"></div>
+        </section>
+
+        <section id="project-list-container" class="project-list-container">
+            <p class="loading-text">Memuat proyek spektakuler...</p>
+        </section>
+    </main>
+
+<footer>
+        <p>© WANZOFC TECH <i class="fas fa-heart"></i>.</p>
+    </footer>
+    <script src="script.js"></script>
+</body>
+</html>
